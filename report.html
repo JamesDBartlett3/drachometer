@@ -36,6 +36,7 @@
     border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
   }
+  header img.coin-logo { height: 28px; width: 28px; flex-shrink: 0; }
   header h1 { font-size: 20px; font-weight: 600; white-space: nowrap; }
   header .meta { color: var(--muted); font-size: 13px; }
   #drop-zone {
@@ -205,6 +206,7 @@
 <body>
 
 <header>
+  <img src="coin.svg" alt="coin" class="coin-logo">
   <h1>Claude Code Token Usage Dashboard</h1>
   <div class="date-slicer" id="date-slicer">
     <button class="readme-btn" id="readme-btn">README</button>
