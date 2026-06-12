@@ -141,6 +141,37 @@ def migrate_settings_for_server_changes() -> bool:
     return changed
 
 
+def apply_sql_migrations() -> None:
+    if not DB_PATH.exists():
+        return
+    migrations_dir = Path(__file__).resolve().parent / "migrations"
+    if not migrations_dir.is_dir():
+        return
+
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)")
+        
+        # Check if 001 was already applied implicitly
+        cursor = conn.execute("PRAGMA table_info(turns)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if "model_id" in columns:
+            conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES ('001_migrate_to_model_dimension.sql')")
+            conn.commit()
+
+        for sql_file in sorted(migrations_dir.glob("*.sql")):
+            version = sql_file.name
+            row = conn.execute("SELECT 1 FROM schema_migrations WHERE version = ?", (version,)).fetchone()
+            if not row:
+                print(f"  Applying SQL migration: {version}")
+                try:
+                    conn.executescript(sql_file.read_text(encoding="utf-8"))
+                    conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
+                    conn.commit()
+                except Exception as e:
+                    print(f"  Error applying migration {version}: {e}")
+                    sys.exit(1)
+
+
 def run_install_migrations(installed_version: str) -> None:
     if semver_key(installed_version) >= semver_key(APP_VERSION):
         return
@@ -401,6 +432,13 @@ def init_database() -> None:
                 pass
         conn.execute("CREATE INDEX IF NOT EXISTS idx_turns_model_id ON turns(model_id)")
         backfill_model_dimension(conn, prompt_if_missing=True)
+
+        conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version TEXT PRIMARY KEY)")
+        migrations_dir = Path(__file__).resolve().parent / "migrations"
+        if migrations_dir.is_dir():
+            for sql_file in sorted(migrations_dir.glob("*.sql")):
+                conn.execute("INSERT OR IGNORE INTO schema_migrations (version) VALUES (?)", (sql_file.name,))
+
         conn.commit()
     print(f"  Database ready at {DB_PATH}")
 
@@ -448,6 +486,7 @@ def main() -> None:
     merge_settings(python_exe)
 
     print("\n[5/6] Initializing database...")
+    apply_sql_migrations()
     init_database()
 
     print("\n[6/6] Running smoke test...")
