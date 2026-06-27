@@ -298,6 +298,122 @@ class TestTwoNodeConvergence(MeshTestBase):
         mesh.DB_PATH = db_a
         self.assertEqual(mesh.sync_with_peer(cfg_a, f"127.0.0.1:{port_b}"), 0)
 
+    def test_three_node_convergence_with_offline_rejoin(self):
+        db_a = self.tmp / "a.db"
+        db_b = self.tmp / "b.db"
+        db_c = self.tmp / "c.db"
+        seed_db(db_a, "nodeA", ["a1"])
+        seed_db(db_b, "nodeB", ["b1"])
+        seed_db(db_c, "nodeC", ["c1"])
+
+        cfg_a = {"mesh_id": "test-mesh", "node_id": "nodeA", "peers": []}
+        cfg_b = {"mesh_id": "test-mesh", "node_id": "nodeB", "peers": []}
+        cfg_c = {"mesh_id": "test-mesh", "node_id": "nodeC", "peers": []}
+
+        port_a = self._serve(cfg_a, db_a)
+        port_b = self._serve(cfg_b, db_b)
+
+        def add_activity(path: Path, node_id: str, session_id: str, turn_id: str):
+            conn = sqlite3.connect(path)
+            try:
+                mesh.ensure_schema(conn)
+                model_id = mesh.ensure_model_row(conn, "claude-opus-4-8")
+                conn.execute(
+                    """INSERT INTO turns (
+                            session_id, turn_id, recorded_at, stop_reason,
+                            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+                            cwd, git_branch, model, model_id)
+                        VALUES (?, ?, ?, 'end_turn', 200, 100, 10, 5, '/tmp', 'main', ?, ?)""",
+                    (session_id, turn_id, f"2026-06-26T10:30:00+00:00", "claude-opus-4-8", model_id),
+                )
+                turn_pk = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                tool_call_id = conn.execute(
+                    """INSERT INTO tool_calls (
+                            uid, turn_pk, session_id, turn_id, recorded_at,
+                            tool_name, tool_input, exit_code, error)
+                        VALUES (?, ?, ?, ?, ?, 'Bash', '{}', 0, NULL)""",
+                    (f"{node_id}-tc-{session_id}", turn_pk, session_id, turn_id,
+                     f"2026-06-26T10:30:00+00:00"),
+                ).lastrowid
+                conn.commit()
+                turn_row = conn.execute(
+                    """SELECT t.session_id, t.turn_id, t.recorded_at, t.stop_reason,
+                              t.input_tokens, t.output_tokens, t.cache_read_tokens,
+                              t.cache_creation_tokens, t.cwd, t.git_branch, m.model_key
+                         FROM turns t LEFT JOIN models m ON t.model_id = m.id
+                         WHERE t.id = ?""",
+                    (turn_pk,),
+                ).fetchone()
+                turn_payload = mesh.turn_payload(dict(zip([
+                    "session_id", "turn_id", "recorded_at", "stop_reason",
+                    "input_tokens", "output_tokens", "cache_read_tokens",
+                    "cache_creation_tokens", "cwd", "git_branch", "model_key"
+                ], turn_row)))
+                mesh.emit_event(conn, node_id, "turn", turn_payload)
+                tool_row = conn.execute(
+                    """SELECT uid, session_id, turn_id, recorded_at, tool_name,
+                              tool_input, exit_code, error
+                         FROM tool_calls WHERE id = ?""",
+                    (tool_call_id,),
+                ).fetchone()
+                mesh.emit_event(conn, node_id, "tool_call", mesh.tool_call_payload(dict(zip([
+                    "uid", "session_id", "turn_id", "recorded_at", "tool_name",
+                    "tool_input", "exit_code", "error"
+                ], tool_row))))
+                conn.commit()
+            finally:
+                conn.close()
+
+        def fetch_turn_rows(path: Path):
+            conn = sqlite3.connect(path)
+            try:
+                return conn.execute(
+                    "SELECT session_id, turn_id, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens FROM turns ORDER BY session_id, turn_id"
+                ).fetchall()
+            finally:
+                conn.close()
+
+        def fetch_tool_rows(path: Path):
+            conn = sqlite3.connect(path)
+            try:
+                return conn.execute(
+                    "SELECT uid, session_id, turn_id, tool_name, exit_code, error FROM tool_calls ORDER BY uid"
+                ).fetchall()
+            finally:
+                conn.close()
+
+        # C stays offline while A and B create and exchange their own records.
+        add_activity(db_a, "nodeA", "a2", "turn-2")
+        add_activity(db_b, "nodeB", "b2", "turn-2")
+        mesh.DB_PATH = db_a
+        mesh.sync_with_peer(cfg_a, f"127.0.0.1:{port_b}")
+        mesh.DB_PATH = db_b
+        mesh.sync_with_peer(cfg_b, f"127.0.0.1:{port_a}")
+
+        self.assertEqual(fetch_turn_rows(db_a), fetch_turn_rows(db_b))
+        self.assertEqual(fetch_tool_rows(db_a), fetch_tool_rows(db_b))
+
+        port_c = self._serve(cfg_c, db_c)
+        add_activity(db_c, "nodeC", "c2", "turn-2")
+
+        for _ in range(2):
+            mesh.DB_PATH = db_a
+            mesh.sync_with_peer(cfg_a, f"127.0.0.1:{port_b}")
+            mesh.sync_with_peer(cfg_a, f"127.0.0.1:{port_c}")
+            mesh.DB_PATH = db_b
+            mesh.sync_with_peer(cfg_b, f"127.0.0.1:{port_a}")
+            mesh.sync_with_peer(cfg_b, f"127.0.0.1:{port_c}")
+            mesh.DB_PATH = db_c
+            mesh.sync_with_peer(cfg_c, f"127.0.0.1:{port_a}")
+            mesh.sync_with_peer(cfg_c, f"127.0.0.1:{port_b}")
+
+        self.assertEqual(fetch_turn_rows(db_a), fetch_turn_rows(db_b))
+        self.assertEqual(fetch_turn_rows(db_b), fetch_turn_rows(db_c))
+        self.assertEqual(fetch_tool_rows(db_a), fetch_tool_rows(db_b))
+        self.assertEqual(fetch_tool_rows(db_b), fetch_tool_rows(db_c))
+        self.assertEqual(event_count(db_a), event_count(db_b))
+        self.assertEqual(event_count(db_b), event_count(db_c))
+
     def test_mesh_id_mismatch_blocks_replication(self):
         db_a = self.tmp / "a.db"
         db_b = self.tmp / "b.db"
