@@ -60,6 +60,23 @@ except ImportError:
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Build the list of mock model identifiers directly from the pricing tiers so they
+# always stay consistent with drachometer-pricing.json. The log-usage hook resolves
+# the tier by matching the tier name as a keyword in the model string.
+def _load_mock_models():
+    pricing_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drachometer-pricing.json")
+    try:
+        with open(pricing_path) as f:
+            tiers = json.load(f).get("tiers", {})
+        models = [f"claude-{tier}" for tier in tiers]
+        if models:
+            return models
+    except Exception as e:
+        logging.warning(f"Could not load pricing tiers ({e}); falling back to sonnet.")
+    return ["claude-sonnet"]
+
+MOCK_MODELS = _load_mock_models()
+
 # --- FastAPI Lifespan and App ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -102,32 +119,8 @@ async def messages_proxy(request: Request):
                 import datetime
                 import sys
                 import uuid
-                # Use a specific session ID when testing to group calls
-                session_id = "test-session-mock"
-                if "--test" in sys.argv:
-                    session_id = "automated-test-run-mock"
-                    
-                payload = json.dumps({
-                    "session_id": session_id,
-                    "turn_id": f"turn-{random.randint(1, 20)}",
-                    "tool": {
-                        "name": tool_name,
-                        "input": {"mock": "data"}
-                    },
-                    "result": {
-                        "exit_code": 0
-                    }
-                })
-                # Attempt to call the log usage hook directly to mock Claude's post-tool-use action
-                try:
-                    subprocess.run(
-                        [sys.executable, "hooks/drachometer-log-usage.py", "post-tool-use"],
-                        input=payload,
-                        text=True,
-                        capture_output=True
-                    )
-                except Exception as e:
-                    logging.error(f"Failed to run mock tool usage hook: {e}")
+                # We do not mock log-usage directly anymore to avoid fake session generation. 
+                # This ensures the DB reflects genuine stateless multi-subprocess invocations.
 
             # Anthropic streaming format
             usage_start = {
@@ -177,31 +170,8 @@ async def messages_proxy(request: Request):
     if tool_name:
         import subprocess
         import sys
-        # Use a specific session ID when testing to group calls
-        session_id = "test-session-mock"
-        if "--test" in sys.argv:
-            session_id = "automated-test-run-mock"
-            
-        payload = json.dumps({
-            "session_id": session_id,
-            "turn_id": f"turn-{random.randint(1, 20)}",
-            "tool": {
-                "name": tool_name,
-                "input": {"mock": "data"}
-            },
-            "result": {
-                "exit_code": 0
-            }
-        })
-        try:
-            subprocess.run(
-                [sys.executable, "hooks/drachometer-log-usage.py", "post-tool-use"],
-                input=payload,
-                text=True,
-                capture_output=True
-            )
-        except Exception as e:
-            logging.error(f"Failed to run mock tool usage hook: {e}")
+        # We do not mock log-usage directly anymore to avoid fake session generation. 
+        # This ensures the DB reflects genuine stateless multi-subprocess invocations.
 
     content_block = {
         "type": "tool_use",
@@ -258,27 +228,64 @@ def run_test():
         import time
         import uuid
         time.sleep(1)
-        
-        # Hardcode a single CLI session id so the usage groups correctly into ONE session!
-        test_session = f"auto-test-{uuid.uuid4().hex[:8]}"
-        os.environ["CLAUDE_SESSION_ID"] = test_session
-        
-        print("Sending 3 mock requests via `claude -p`...")
-        for i in range(3):
-            print(f"Request {i+1}/3...")
-            # We use subprocess.run with shell=True to pipe echo to claude
-            result = subprocess.run(
-                'echo "Trigger a mock tool invocation please" | claude -p',
-                shell=True,
-                capture_output=True,
-                text=True
-            )
+
+        # Simulate a multi-turn session by feeding mock usage payloads to the same
+        # hooks Claude invokes internally, all sharing one session ID.
+        test_session = str(uuid.uuid4())
+
+        print(f"Simulating a 3-turn session: {test_session}")
+        for i in range(1, 4):
+            print(f"Simulating Turn {i}/3...")
+            tool_name = random.choice([None, "read_file", "run_in_terminal", "grep_search"])
+            if tool_name:
+                payload = json.dumps({
+                    "session_id": test_session,
+                    "turn_id": f"turn-{i}",
+                    "tool": {
+                        "name": tool_name,
+                        "input": {"mock": "data"}
+                    },
+                    "result": {
+                        "exit_code": 0
+                    }
+                })
+                subprocess.run(
+                    [sys.executable, "hooks/drachometer-log-usage.py", "post-tool-use"],
+                    input=payload,
+                    text=True,
+                    capture_output=True
+                )
             
-            if result.returncode != 0:
-                print(f"Error calling claude CLI: {result.stderr}")
-            else:
-                print(f"Response: {result.stdout.strip()}")
-                
+            # Second, trigger the 'stop' event hook which calculates usage just like Claude ending its stream!
+            base_scale = random.randint(5000, 30000)
+            cache_read_input_tokens = int(base_scale * random.uniform(0.85, 0.98))
+            cache_creation_input_tokens = int(base_scale * random.uniform(0.0, 0.05))
+            input_tokens = max(0, base_scale - cache_read_input_tokens - cache_creation_input_tokens)
+            output_tokens = random.randint(10, 100)
+            
+            payload = json.dumps({
+                "session_id": test_session,
+                "message": {
+                    "usage": {
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cache_read_input_tokens": cache_read_input_tokens,
+                        "cache_creation_input_tokens": cache_creation_input_tokens
+                    },
+                    "stop_reason": "tool_use" if tool_name else "end_turn"
+                },
+                "model": random.choice(MOCK_MODELS),
+                "cwd": os.getcwd(),
+                "git_branch": "test-mock-branch"
+            })
+            subprocess.run(
+                [sys.executable, "hooks/drachometer-log-usage.py", "stop"],
+                input=payload,
+                text=True,
+                capture_output=True
+            )
+            time.sleep(0.5)
+
         print("\nChecking Drachometer SQLite Database for tool_calls...")
         db_path = os.path.expanduser('~/.claude/drachometer.db')
         if os.path.exists(db_path):
