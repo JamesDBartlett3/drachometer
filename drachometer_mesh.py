@@ -14,7 +14,7 @@ that happen to share a LAN (coworkers, roommates); it is **not** a security
 boundary -- there is no authentication and no TLS. Do not expose mesh ports to
 the public internet.
 
-This file is both an importable library (the hook and the report server import
+This file is both an importable library (the hook and the dashboard server import
 it) and a CLI for setup and maintenance::
 
     python drachometer_mesh.py init  --name home [--port 9874] [--advertise HOST]
@@ -722,7 +722,7 @@ def import_database(conn: sqlite3.Connection, other_db: Path, label: str | None)
 
 
 # --------------------------------------------------------------------------- #
-# HTTP transport -- mesh endpoints (separate from the loopback report server).
+# HTTP transport -- mesh endpoints (separate from the loopback dashboard server).
 # --------------------------------------------------------------------------- #
 class _PeerRegistry:
     """Configured seeds plus peers learned via startup registration."""
@@ -1017,7 +1017,7 @@ def _announce(cfg: dict, registry: _PeerRegistry) -> None:
 def start_mesh(app_version: str = "", db_path: Path | None = None, inherited_socket: int | None = None) -> bool:
     """Start the mesh HTTP server and gossip daemon if mesh is enabled.
 
-    Returns True if mesh was started. Safe to call from the report server; all
+    Returns True if mesh was started. Safe to call from the dashboard server; all
     work happens on daemon threads.
     """
     cfg = load_config()

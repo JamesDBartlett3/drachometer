@@ -4,7 +4,7 @@
 
 Drachometer: "drachma" (ancient Greek currency) + "meter" = a token usage meter for Claude Code.
 
-A Claude Code hook that logs every turn and tool call to a local SQLite database, with a browser dashboard for exploring token usage, costs, and cache efficiency. Features model-aware pricing, multi-sort tables, date filtering, live SSE refresh, and rich charts. No API keys or external services. 
+A Claude Code hook that logs every turn and tool call to a local SQLite database, with a browser dashboard for exploring token usage, costs, and cache efficiency. Features model-aware pricing, multi-sort tables, date filtering, live SSE refresh, and rich charts. No API keys or external services.
 
 ![Dashboard](https://img.shields.io/badge/dashboard-localhost:9873-c87533)
 
@@ -26,12 +26,12 @@ These bootstrap scripts resolve the latest published release via the GitHub Rele
 
 The bootstrap scripts accept environment variables so you can point them at a fork, a private mirror, or a locally built zip:
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `DRACHOMETER_REPO` | `JamesDBartlett3/drachometer` | GitHub `owner/repo` used to resolve releases |
-| `DRACHOMETER_RELEASES_API` | `https://api.github.com/repos/<REPO>/releases/latest` | Full URL for the GitHub Releases API call |
-| `DRACHOMETER_ASSET_NAME` | `drachometer.zip` | Filename of the release asset to download |
-| `DRACHOMETER_ARCHIVE_URL` | *(not set)* | When set, skips the API lookup and downloads from this URL directly |
+| Variable                   | Default                                               | Purpose                                                             |
+| -------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------- |
+| `DRACHOMETER_REPO`         | `JamesDBartlett3/drachometer`                         | GitHub `owner/repo` used to resolve releases                        |
+| `DRACHOMETER_RELEASES_API` | `https://api.github.com/repos/<REPO>/releases/latest` | Full URL for the GitHub Releases API call                           |
+| `DRACHOMETER_ASSET_NAME`   | `drachometer.zip`                                     | Filename of the release asset to download                           |
+| `DRACHOMETER_ARCHIVE_URL`  | _(not set)_                                           | When set, skips the API lookup and downloads from this URL directly |
 
 Both scripts also accept `file://` paths and plain local filesystem paths for `ARCHIVE_URL`, which lets you install completely offline from a locally built zip:
 
@@ -62,6 +62,7 @@ That's it. Usage is logged automatically from that point on.
 ## Dashboard Features
 
 ### KPIs
+
 - **Total Cost** with daily average
 - **Total Input Context** with cache hit percentage
 - **Output Tokens** with uncached input count
@@ -70,16 +71,19 @@ That's it. Usage is logged automatically from that point on.
 - **Avg Cost / Session** with per-turn average
 
 ### Charts
+
 - **Daily Cost Breakdown** — waterfall chart showing cost by category (uncached input, output, cache read, cache create) with a running total
 - **Cost by Day** — line chart with one line per model tier (Opus, Sonnet, Haiku)
 - **Top Tools** — horizontal bar chart of most-used tools
 - **Cache Hit Rate** — line chart of daily prompt cache efficiency
 
 ### Tables
+
 - **Sessions** — cost, tokens, model, directory, and branch per session
 - **Recent Turns** — last 50 turns with full token breakdown
 
 ### Interactive Features
+
 - **Date range slicer** — preset buttons (All, Today, 7d, 30d, 90d) and a Flatpickr date range picker in the header; selection persists across refreshes
 - **Hourly drill-down** — when a single date is selected, time-based charts automatically switch from daily to hourly granularity
 - **Multi-sort tables** — click any column header to sort; Ctrl+click to add secondary/tertiary sort columns (▲/▼ indicators with subscript priority)
@@ -93,6 +97,7 @@ That's it. Usage is logged automatically from that point on.
 ## What Gets Logged
 
 Each **turn** (one assistant response) records:
+
 - Token counts: uncached input, output, cache read, cache creation
 - Model relationship (`model_id`) to the `models` dimension table
 - Working directory and git branch
@@ -100,6 +105,7 @@ Each **turn** (one assistant response) records:
 - Timestamp (UTC)
 
 Each **tool call** records:
+
 - Tool name and input
 - Exit code and errors
 - Linked back to the parent turn
@@ -107,6 +113,7 @@ Each **tool call** records:
 All data is extracted from Claude Code's transcript files — no API keys or external services required.
 
 Each **model** row in the dimension table stores:
+
 - Model key from transcript data (e.g. `claude-opus-4-20250115`)
 - Model name
 - Model version
@@ -131,7 +138,7 @@ During install/upgrade, `drachometer-install.py`:
 1. Reads the installed app version from `~/.claude/hooks/drachometer/drachometer-version.json` (defaults to `0.0.0` when not present).
 2. Applies migration steps for older versions while preserving existing data.
    - Database filename/path migration for known legacy locations.
-   - Hook settings migration for HTTP server behavior changes (removes legacy direct `drachometer-serve-report.py` hooks).
+   - Hook settings migration for HTTP server behavior changes (removes legacy direct `drachometer-serve-dashboard.py` hooks).
    - Database schema migration/backfill via normal DB initialization.
 3. Copies the latest files and writes the new version metadata.
 
@@ -247,9 +254,24 @@ All per-token pricing lives in one place — [`drachometer-pricing.json`](dracho
 ```json
 {
   "tiers": {
-    "opus":   { "input": 5,  "output": 25, "cache_read": 0.5,  "cache_create": 6.25 },
-    "sonnet": { "input": 3,  "output": 15, "cache_read": 0.3,  "cache_create": 3.75 },
-    "haiku":  { "input": 1,  "output": 5,  "cache_read": 0.1,  "cache_create": 1.25 }
+    "opus": {
+      "input": 5,
+      "output": 25,
+      "cache_read": 0.5,
+      "cache_create": 6.25
+    },
+    "sonnet": {
+      "input": 3,
+      "output": 15,
+      "cache_read": 0.3,
+      "cache_create": 3.75
+    },
+    "haiku": {
+      "input": 1,
+      "output": 5,
+      "cache_read": 0.1,
+      "cache_create": 1.25
+    }
   }
 }
 ```
@@ -266,7 +288,7 @@ A turn's cost uses the model's stored per-row pricing when present (so you can h
 
 Anthropic does not publish a pricing REST API, so [`.github/workflows/update-pricing.yml`](.github/workflows/update-pricing.yml) runs [`scripts/drachometer-update-pricing.py`](scripts/drachometer-update-pricing.py) on a weekly schedule (and on demand) to scrape the published pricing and commit any changes to `drachometer-pricing.json`.
 
-Every tier is **optional**: if a model disappears from the pricing page (e.g. a withdrawn model), its last-known price is preserved rather than wiped. The scraper is also **fail-loud**: if it can't parse *any* pricing at all — which means the page format or URL changed — it exits non-zero and writes nothing, so the workflow run fails (notifying maintainers) while the last-good `drachometer-pricing.json` stays in effect.
+Every tier is **optional**: if a model disappears from the pricing page (e.g. a withdrawn model), its last-known price is preserved rather than wiped. The scraper is also **fail-loud**: if it can't parse _any_ pricing at all — which means the page format or URL changed — it exits non-zero and writes nothing, so the workflow run fails (notifying maintainers) while the last-good `drachometer-pricing.json` stays in effect.
 
 The `fable` tier is fully wired through the dashboard, hook, and installer, so when Claude Fable pricing is published it is picked up automatically with no code or schema change.
 
@@ -290,7 +312,7 @@ Mesh replication lets several machines on the same trusted network share one com
 ### Scope and safety
 
 - **LAN/VM networks only.** This is designed for a home/lab network or a set of VMs. It is **out of scope** for the public internet/WAN.
-- **Not a security boundary.** There is no authentication and no TLS. The mesh identifier exists to prevent *accidental* cross-merges between unrelated meshes that happen to share a LAN (coworkers, roommates) — not to keep data private. **Do not expose the mesh port to the internet.** Restrict it with your firewall to the LAN/VM subnet.
+- **Not a security boundary.** There is no authentication and no TLS. The mesh identifier exists to prevent _accidental_ cross-merges between unrelated meshes that happen to share a LAN (coworkers, roommates) — not to keep data private. **Do not expose the mesh port to the internet.** Restrict it with your firewall to the LAN/VM subnet.
 
 ### How it works
 
@@ -318,7 +340,7 @@ python drachometer-install.py --join-mesh home-a1b2c3d4 --peer 192.168.1.10:9874
 python "$HOME/.claude/hooks/drachometer/drachometer_mesh.py" join home-a1b2c3d4 --peer 192.168.1.10:9874
 ```
 
-Options: `--mesh-port` (default `9874`), `--advertise HOST` (the address peers use to reach this node; auto-detected if omitted), and repeatable `--peer HOST:PORT` seeds. The mesh server starts automatically with the report server.
+Options: `--mesh-port` (default `9874`), `--advertise HOST` (the address peers use to reach this node; auto-detected if omitted), and repeatable `--peer HOST:PORT` seeds. The mesh server starts automatically with the dashboard server.
 
 Joining a node that already has history is safe: its existing rows are **backfilled** into the oplog and replicate to peers, while peers' history flows back — so two independently-created clients converge to the union.
 
@@ -364,7 +386,7 @@ drachometer-install.ps1             # Network installer bootstrap (Windows Power
 drachometer-install.py              # Installer script
 drachometer-install.sh              # Network installer bootstrap (Mac/Linux/WSL2)
 hooks/drachometer-log-usage.py      # Hook script (Stop + PostToolUse events)
-drachometer-serve-report.py         # Dashboard server (auto-launched by hook)
+drachometer-serve-dashboard.py         # Dashboard server (auto-launched by hook)
 drachometer_mesh.py                 # Mesh replication library + CLI (opt-in, LAN/VM)
 drachometer-dashboard.html             # Browser dashboard (sql.js + Chart.js)
 drachometer-pricing.json            # Per-tier model pricing (single source of truth)
@@ -381,7 +403,7 @@ After install, the source folder can be deleted. Everything runs from:
 
 ```
 ~/.claude/hooks/drachometer/drachometer-log-usage.py    # Hook script
-~/.claude/hooks/drachometer/drachometer-serve-report.py # Dashboard server
+~/.claude/hooks/drachometer/drachometer-serve-dashboard.py # Dashboard server
 ~/.claude/hooks/drachometer/drachometer_mesh.py         # Mesh replication library + CLI
 ~/.claude/hooks/drachometer/drachometer-dashboard.html     # Dashboard
 ~/.claude/hooks/drachometer/drachometer-pricing.json    # Per-tier model pricing

@@ -20,9 +20,9 @@ except Exception:
 
 DB_PATH = Path.home() / ".claude" / "drachometer.db"
 SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
-LEGACY_REPORT_SERVER = Path.home() / ".claude" / "hooks" / "drachometer-serve-report.py"
-REPORT_SERVER = Path.home() / ".claude" / "hooks" / "drachometer" / "drachometer-serve-report.py"
-REPORT_PORT = 9873
+LEGACY_DASHBOARD_SERVER = Path.home() / ".claude" / "hooks" / "drachometer-serve-report.py"
+DASHBOARD_SERVER = Path.home() / ".claude" / "hooks" / "drachometer" / "drachometer-serve-dashboard.py"
+DASHBOARD_PORT = 9873
 
 # Offline fallback pricing (USD per 1M tokens). Overlaid at import by values
 # from drachometer-pricing.json (installed alongside this script, kept fresh by a GitHub
@@ -208,12 +208,12 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def ensure_report_server() -> None:
+def ensure_dashboard_server() -> None:
     import socket
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex(("127.0.0.1", REPORT_PORT)) == 0:
+        if s.connect_ex(("127.0.0.1", DASHBOARD_PORT)) == 0:
             return
-    server_path = REPORT_SERVER if REPORT_SERVER.exists() else LEGACY_REPORT_SERVER
+    server_path = DASHBOARD_SERVER if DASHBOARD_SERVER.exists() else LEGACY_DASHBOARD_SERVER
     if server_path.exists():
         subprocess.Popen(
             [sys.executable, str(server_path)],
@@ -584,7 +584,7 @@ def main() -> None:
             elif event == "post-tool-use":
                 handle_post_tool_use(conn, payload, mesh_node)
         try:
-            ensure_report_server()
+            ensure_dashboard_server()
         except Exception:
             pass
     except Exception:

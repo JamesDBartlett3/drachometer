@@ -13,7 +13,7 @@ PORT = 9873
 SCRIPT_DIR = Path(__file__).resolve().parent
 DB_PATH = Path.home() / ".claude" / "drachometer.db"
 
-# Optional mesh replication; absence leaves the loopback report server unchanged.
+# Optional mesh replication; absence leaves the loopback dashboard server unchanged.
 sys.path.insert(0, str(SCRIPT_DIR))
 try:
     import drachometer_mesh as mesh
@@ -102,7 +102,7 @@ def main():
     watcher.start()
 
     # Start mesh replication if the user has enabled it. The mesh listener binds
-    # its own LAN-facing port; this report server stays loopback-only.
+    # its own LAN-facing port; this dashboard server stays loopback-only.
     if mesh is not None:
         try:
             if mesh.start_mesh(_app_version()):
@@ -117,7 +117,7 @@ def main():
         server = ThreadingServer(("127.0.0.1", PORT), Handler)
     except OSError:
         sys.exit(0)
-    print(f"Serving report at http://localhost:{PORT}/drachometer-dashboard.html")
+    print(f"Serving dashboard at http://localhost:{PORT}/drachometer-dashboard.html")
     server.serve_forever()
 
 

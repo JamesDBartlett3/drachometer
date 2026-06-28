@@ -29,7 +29,7 @@ jobs:
             migrations \
             drachometer-pricing.json \
             drachometer-dashboard.html \
-            drachometer-serve-report.py \
+            drachometer-serve-dashboard.py \
             drachometer_mesh.py \
             drachometer-version.json
 

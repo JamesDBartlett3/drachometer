@@ -18,21 +18,21 @@ When you publish a GitHub Release, the **Release package** workflow automaticall
 2. Click **Choose a tag** and type the new version prefixed with `v` (e.g. `v1.2.0`), then select **Create new tag on publish**.
 3. Set the target to `main` (or the commit you want to release).
 4. Fill in the release title and release notes.
-5. Click **Publish release** (not *Save draft*).
+5. Click **Publish release** (not _Save draft_).
 
-> **Important:** The workflow only triggers on `published`, not on draft releases. Do not click *Publish* until the release notes and tag are final.
+> **Important:** The workflow only triggers on `published`, not on draft releases. Do not click _Publish_ until the release notes and tag are final.
 
 ## What the workflow does
 
 File: `.github/workflows/release-package.yml`
 
-| Step | What happens |
-|------|-------------|
-| Trigger | Fires on `release: types: [published]` |
-| Permissions | `contents: write` (needed to upload the release asset) |
-| Check out | Checks out the repository at the tagged commit |
-| Build zip | Creates `dist/drachometer.zip` containing: `README.md`, `coin.svg`, `hooks/`, `drachometer-install.bat`, `drachometer-install.ps1`, `drachometer-install.py`, `drachometer-install.sh`, `migrations/`, `drachometer-dashboard.html`, `drachometer-serve-report.py`, `drachometer_mesh.py`, `drachometer-version.json` |
-| Upload asset | Attaches the zip to the published release via `softprops/action-gh-release` |
+| Step         | What happens                                                                                                                                                                                                                                                                                                             |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Trigger      | Fires on `release: types: [published]`                                                                                                                                                                                                                                                                                   |
+| Permissions  | `contents: write` (needed to upload the release asset)                                                                                                                                                                                                                                                                   |
+| Check out    | Checks out the repository at the tagged commit                                                                                                                                                                                                                                                                           |
+| Build zip    | Creates `dist/drachometer.zip` containing: `README.md`, `coin.svg`, `hooks/`, `drachometer-install.bat`, `drachometer-install.ps1`, `drachometer-install.py`, `drachometer-install.sh`, `migrations/`, `drachometer-dashboard.html`, `drachometer-serve-dashboard.py`, `drachometer_mesh.py`, `drachometer-version.json` |
+| Upload asset | Attaches the zip to the published release via `softprops/action-gh-release`                                                                                                                                                                                                                                              |
 
 The zip intentionally omits development-only files (`.github/`, `.git/`, `screenshots/`, etc.) so users receive only what is needed to install and run the dashboard.
 
@@ -62,9 +62,9 @@ After the workflow completes (usually under a minute):
 
 ## Workflow action versions
 
-| Action | Pinned version |
-|--------|---------------|
-| `actions/checkout` | `v6.0.3` |
-| `softprops/action-gh-release` | `v3.0.0` |
+| Action                        | Pinned version |
+| ----------------------------- | -------------- |
+| `actions/checkout`            | `v6.0.3`       |
+| `softprops/action-gh-release` | `v3.0.0`       |
 
 To update an action version, edit `.github/workflows/release-package.yml` and update the `uses:` line, then commit to `main` before the next release.

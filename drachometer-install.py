@@ -29,8 +29,8 @@ VERSION_PATH = HOOKS_DIR / "drachometer-version.json"
 LEGACY_VERSION_PATH = HOOKS_ROOT_DIR / "drachometer-version.json"
 
 REPO_HOOKS = Path(__file__).resolve().parent / "hooks"
-REPO_REPORT = Path(__file__).resolve().parent / "drachometer-dashboard.html"
-REPO_SERVER = Path(__file__).resolve().parent / "drachometer-serve-report.py"
+REPO_DASHBOARD = Path(__file__).resolve().parent / "drachometer-dashboard.html"
+REPO_SERVER = Path(__file__).resolve().parent / "drachometer-serve-dashboard.py"
 REPO_MESH = Path(__file__).resolve().parent / "drachometer_mesh.py"
 
 REPO_README = Path(__file__).resolve().parent / "README.md"
@@ -43,9 +43,9 @@ APP_VERSION = str(APP_METADATA.get("version", "0.0.0"))
 
 HOOK_FILES = {
     "drachometer-log-usage.py": REPO_HOOKS / "drachometer-log-usage.py",
-    "drachometer-serve-report.py": REPO_SERVER,
+    "drachometer-serve-dashboard.py": REPO_SERVER,
     "drachometer_mesh.py": REPO_MESH,
-    "drachometer-dashboard.html": REPO_REPORT,
+    "drachometer-dashboard.html": REPO_DASHBOARD,
     "README.md": REPO_README,
     "coin.svg": REPO_COIN,
     "drachometer-version.json": REPO_VERSION,
@@ -128,7 +128,7 @@ def migrate_settings_for_server_changes() -> bool:
             filtered = []
             for hook in hook_defs:
                 command = hook.get("command", "") if isinstance(hook, dict) else ""
-                if "drachometer-serve-report.py" in command:
+                if "drachometer-serve-dashboard.py" in command:
                     changed = True
                     continue
                 filtered.append(hook)
@@ -612,8 +612,8 @@ def main(argv=None) -> None:
     print("\n" + "=" * 40)
     print("Installation complete!\n")
     print("Token usage will be logged automatically every time you")
-    print("use Claude Code. The report server starts on first use.\n")
-    print("To view the report, open:")
+    print("use Claude Code. The dashboard server starts on first use.\n")
+    print("To view the dashboard, open:")
     print("  http://localhost:9873/drachometer-dashboard.html\n")
     print(f"Database: {DB_PATH}")
     print(f"Hooks:    {HOOKS_DIR}")
