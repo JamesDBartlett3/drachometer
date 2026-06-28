@@ -353,6 +353,10 @@ def derive_turn_id(payload: dict) -> str:
     inside tool output or assistant content is not mis-counted as a user
     message boundary.
     """
+    turn_id = payload.get("turn_id")
+    if turn_id:
+        return str(turn_id)
+
     transcript = payload.get("transcript_path", "")
     if transcript:
         try:
@@ -394,11 +398,12 @@ def handle_stop(conn: sqlite3.Connection, payload: dict, mesh_node: str | None =
     cwd = payload.get("cwd")
     git_branch = get_git_branch(cwd) if cwd else None
     transcript = payload.get("transcript_path", "")
+    message = payload.get("message") or {}
     t_info = get_transcript_info(transcript) if transcript else {"model": None, "usage": {}, "stop_reason": None}
-    model = t_info["model"]
+    model = t_info["model"] or payload.get("model") or message.get("model")
     model_id = ensure_model_row(conn, model)
-    usage = t_info["usage"]
-    stop_reason = t_info["stop_reason"] or payload.get("stop_reason")
+    usage = t_info["usage"] if transcript else (payload.get("usage") or message.get("usage") or {})
+    stop_reason = t_info["stop_reason"] or payload.get("stop_reason") or message.get("stop_reason")
 
     conn.execute("""
         INSERT INTO turns (

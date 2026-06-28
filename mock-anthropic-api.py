@@ -60,20 +60,17 @@ except ImportError:
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Build the list of mock model identifiers directly from the pricing tiers so they
-# always stay consistent with drachometer-pricing.json. The log-usage hook resolves
-# the tier by matching the tier name as a keyword in the model string.
 def _load_mock_models():
     pricing_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drachometer-pricing.json")
     try:
         with open(pricing_path) as f:
             tiers = json.load(f).get("tiers", {})
-        models = [f"claude-{tier}" for tier in tiers]
+        models = [entry.get("model") for entry in tiers.values() if isinstance(entry, dict) and entry.get("model")]
         if models:
             return models
     except Exception as e:
-        logging.warning(f"Could not load pricing tiers ({e}); falling back to sonnet.")
-    return ["claude-sonnet"]
+        logging.warning(f"Could not load pricing tiers ({e}); mock models unavailable.")
+    raise RuntimeError("drachometer-pricing.json must define a model name for each tier")
 
 MOCK_MODELS = _load_mock_models()
 
