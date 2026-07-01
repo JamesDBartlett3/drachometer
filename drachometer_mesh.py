@@ -37,9 +37,11 @@ import gzip
 import hashlib
 import ipaddress
 import json
+import platform
 import re
 import socket
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -1140,7 +1142,11 @@ def stop_mesh() -> bool:
 # Local subnet discovery + live status (dashboard-driven configuration)
 # --------------------------------------------------------------------------- #
 def list_local_ipv4s() -> list[str]:
-    """Best-effort set of this host's non-loopback IPv4 addresses across NICs."""
+    """Best-effort set of this host's non-loopback IPv4 addresses across NICs.
+
+    Used only as a fallback when the OS network tools cannot be queried for the
+    real per-interface netmask (see :func:`list_local_interfaces`).
+    """
     ips: set[str] = set()
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
@@ -1155,8 +1161,118 @@ def list_local_ipv4s() -> list[str]:
     return sorted(ip for ip in ips if not ipaddress.ip_address(ip).is_loopback)
 
 
+def _netmask_to_prefix(mask: str) -> int | None:
+    """Convert a netmask to a prefix length.
+
+    Accepts a dotted-quad (``255.255.255.0``), a hex mask (``0xffffff00``) as
+    printed by BSD/macOS ``ifconfig``, or a bare prefix (``24``).
+    """
+    mask = (mask or "").strip()
+    if not mask:
+        return None
+    try:
+        if mask.lower().startswith("0x"):
+            dotted = str(ipaddress.IPv4Address(int(mask, 16)))
+        elif "." in mask:
+            dotted = mask
+        else:
+            prefix = int(mask)
+            return prefix if 0 <= prefix <= 32 else None
+        return ipaddress.IPv4Network(f"0.0.0.0/{dotted}").prefixlen
+    except (ValueError, ipaddress.AddressValueError, ipaddress.NetmaskValueError):
+        return None
+
+
+def _parse_ip_addr_output(text: str) -> list[tuple[str, int]]:
+    """Parse ``ip -o -f inet addr show`` (Linux iproute2) output.
+
+    Each address already carries its prefix, e.g. ``inet 192.168.1.50/24``.
+    """
+    out: list[tuple[str, int]] = []
+    for match in re.finditer(r"inet (\d+\.\d+\.\d+\.\d+)/(\d+)", text):
+        out.append((match.group(1), int(match.group(2))))
+    return out
+
+
+def _parse_ifconfig_output(text: str) -> list[tuple[str, int]]:
+    """Parse ``ifconfig`` output (BSD/macOS hex masks or Linux dotted masks)."""
+    out: list[tuple[str, int]] = []
+    pattern = re.compile(
+        r"inet (?:addr:)?(\d+\.\d+\.\d+\.\d+).*?"
+        r"(?:netmask|Mask:?)\s*(0x[0-9a-fA-F]+|\d+\.\d+\.\d+\.\d+)",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(text):
+        prefix = _netmask_to_prefix(match.group(2))
+        if prefix is not None:
+            out.append((match.group(1), prefix))
+    return out
+
+
+def _parse_windows_ipconfig_output(text: str) -> list[tuple[str, int]]:
+    """Parse Windows ``ipconfig`` output, pairing each IPv4 with its subnet mask."""
+    out: list[tuple[str, int]] = []
+    pending_ip: str | None = None
+    for line in text.splitlines():
+        ipv4 = re.search(r"IPv4 Address.*?:\s*([\d.]+)", line)
+        if ipv4:
+            pending_ip = ipv4.group(1).strip()
+            continue
+        mask = re.search(r"Subnet Mask.*?:\s*([\d.]+)", line)
+        if mask and pending_ip:
+            prefix = _netmask_to_prefix(mask.group(1).strip())
+            if prefix is not None:
+                out.append((pending_ip, prefix))
+            pending_ip = None
+    return out
+
+
+def list_local_interfaces() -> list[tuple[str, int]]:
+    """Enumerate active NICs as ``(ipv4, prefix_length)`` from the OS.
+
+    Subnets are read from the machine's real interface configuration rather than
+    assumed, so discovery scans exactly the networks this host is attached to.
+    Loopback, link-local and unspecified addresses are skipped. Returns an empty
+    list if no network tool could be queried (callers then fall back).
+    """
+    if platform.system() == "Windows":
+        commands: list[tuple[list[str], object]] = [
+            (["ipconfig"], _parse_windows_ipconfig_output),
+        ]
+    else:
+        commands = [
+            (["ip", "-o", "-f", "inet", "addr", "show"], _parse_ip_addr_output),
+            (["ifconfig", "-a"], _parse_ifconfig_output),
+            (["ifconfig"], _parse_ifconfig_output),
+        ]
+    for argv, parser in commands:
+        try:
+            proc = subprocess.run(argv, capture_output=True, text=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if not proc.stdout:
+            continue
+        result: list[tuple[str, int]] = []
+        for ip, prefix in parser(proc.stdout):  # type: ignore[operator]
+            try:
+                addr = ipaddress.ip_address(ip)
+            except ValueError:
+                continue
+            if addr.is_loopback or addr.is_link_local or addr.is_unspecified:
+                continue
+            if not (0 <= prefix <= 32):
+                continue
+            result.append((ip, prefix))
+        if result:
+            return result
+    return []
+
+
 def subnets_from_ips(ips: list[str], prefix: int = 24) -> list[str]:
-    """Derive unique CIDR subnets (default /24) covering the given IPv4 addresses."""
+    """Derive unique CIDR subnets (default /24) covering the given IPv4 addresses.
+
+    Fallback only, used when real NIC netmasks cannot be read from the OS.
+    """
     nets: list[str] = []
     seen: set[str] = set()
     for ip in ips:
@@ -1171,9 +1287,26 @@ def subnets_from_ips(ips: list[str], prefix: int = 24) -> list[str]:
     return nets
 
 
-def list_local_subnets(prefix: int = 24) -> list[str]:
-    """All local IPv4 subnets on enabled NICs (approximated as /prefix networks)."""
-    return subnets_from_ips(list_local_ipv4s(), prefix)
+def list_local_subnets(fallback_prefix: int = 24) -> list[str]:
+    """All local IPv4 subnets, taken from the active NIC(s) real netmasks.
+
+    Falls back to approximating each detected address as a /``fallback_prefix``
+    network only when the OS interface list cannot be obtained.
+    """
+    subnets: list[str] = []
+    seen: set[str] = set()
+    for ip, prefix in list_local_interfaces():
+        try:
+            net = ipaddress.ip_network(f"{ip}/{prefix}", strict=False)
+        except ValueError:
+            continue
+        key = str(net)
+        if key not in seen:
+            seen.add(key)
+            subnets.append(key)
+    if subnets:
+        return subnets
+    return subnets_from_ips(list_local_ipv4s(), fallback_prefix)
 
 
 def _hosts_for_subnets(subnets: list[str], cap: int = DISCOVERY_MAX_HOSTS) -> list[str]:
