@@ -786,6 +786,8 @@ class TestSubnetDiscovery(MeshTestBase):
         self._spawn_mesh_node(db_a, "nodeA", "lab-dddd4444", port, listen_socket=listen_socket)
 
         mesh.CONFIG_PATH = self.tmp / "mesh.json"
+        if mesh.CONFIG_PATH.exists():
+            mesh.CONFIG_PATH.unlink()
         result = mesh.discover_meshes(port=port, subnets=["127.0.0.0/30"])
         self.assertIsNone(result["current_mesh_id"])
         self.assertEqual({m["mesh_id"] for m in result["meshes"]}, {"lab-dddd4444"})

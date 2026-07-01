@@ -2489,7 +2489,11 @@
             <h2>Current mesh</h2>
             <div class="mesh-row" style="align-items:center">
               <span class="mesh-dot ${dotClass}"></span>
-              <strong>${esc(s.mesh_id || "")}</strong>
+              <strong>Mesh ID</strong>
+            </div>
+            <div class="mesh-row" style="margin-top:8px">
+              <input class="mesh-input" value="${esc(s.mesh_id || "")}" readonly
+                title="Current mesh ID" onclick="this.select()" style="width:100%" />
             </div>
             <div class="mesh-stat-grid">
               <div class="mesh-stat"><div class="label">Connection</div><div class="value">${
